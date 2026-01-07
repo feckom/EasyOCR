@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="{{ ui_lang or 'sk' }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EasyOCR – Local OCR Tool</title>
+
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;}
+    h1{font-size:1.4rem;margin:0;}
+    .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 2px 6px rgba(0,0,0,.05);}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media (max-width:800px){.grid2{grid-template-columns:1fr}}
+    label{font-weight:600;}
+    .langs{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;}
+    button{padding:10px 16px;border-radius:8px;border:1px solid #888;background:#f6f6f6;cursor:pointer}
+    button:hover{background:#eee}
+    .danger{border-color:#d33;background:#ffecec}
+    .danger:hover{background:#ffdede}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #ccc;background:#fafafa;margin-right:6px}
+    .muted{color:#666}
+    .ok{color:#0a7d28;font-weight:600}
+    .warn{color:#a35b00;font-weight:600}
+    textarea{width:100%;min-height:260px;border:1px solid #ddd;border-radius:8px;padding:10px;font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    a.btn{display:inline-block;padding:10px 14px;border:1px solid #888;border-radius:8px;text-decoration:none;color:inherit;background:#f6f6f6}
+    a.btn:hover{background:#eee}
+    footer{margin-top:24px}
+    .lang-switch{display:flex;gap:6px}
+    .lang-switch a{padding:6px 10px;border:1px solid #ccc;border-radius:8px;text-decoration:none;color:inherit}
+    .lang-switch a.active{background:#ddd;font-weight:600}
+  </style>
+
+  <script>
+    function copyPlain() {
+      const el = document.getElementById('plainText');
+      if (!el) return;
+      el.select();
+      el.setSelectionRange(0, 999999);
+      navigator.clipboard.writeText(el.value).then(() => {
+        const b = document.getElementById('copyBtn');
+        if (b){ b.textContent = '✓'; setTimeout(()=> b.textContent='Copy', 1000); }
+      });
+    }
+    function confirmReset(e){
+      if(!confirm('{{ "Naozaj chceš resetovať OCR cache?" if ui_lang=="sk" else "Do you really want to reset OCR cache?" }}')){
+        e.preventDefault();
+      }
+    }
+  </script>
+</head>
+
+<body>
+
+<header>
+  <h1>
+    {% if ui_lang == "sk" %}
+      EasyOCR – Lokálny OCR nástroj
+    {% else %}
+      EasyOCR – Local OCR Tool
+    {% endif %}
+  </h1>
+
+  <div class="lang-switch">
+    <a href="/?lang=sk" class="{% if ui_lang=='sk' %}active{% endif %}">SK</a>
+    <a href="/?lang=en" class="{% if ui_lang=='en' %}active{% endif %}">EN</a>
+  </div>
+
+  <form action="{{ url_for('reset') }}" method="post" onsubmit="confirmReset(event)">
+    <button type="submit" class="danger">
+      {% if ui_lang=="sk" %}Reset{% else %}Reset{% endif %}
+    </button>
+  </form>
+</header>
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    {% for m in messages %}
+      <div class="card"><strong>{{ m }}</strong></div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+{% if warn %}
+  <div class="card"><span class="warn">{{ warn }}</span></div>
+{% endif %}
+
+<div class="card">
+  <form action="{{ url_for('ocr') }}" method="post" enctype="multipart/form-data">
+
+    <div class="grid2">
+      <div>
+        <label>
+          {% if ui_lang=="sk" %}Súbor{% else %}File{% endif %}
+        </label><br/>
+        <input type="file" name="image" required
+               accept=".png,.jpg,.jpeg,.pdf" />
+        <p class="muted">
+          {% if ui_lang=="sk" %}
+            PNG/JPG max 10 MB • PDF max 50 MB • max 50 strán
+          {% else %}
+            PNG/JPG max 10 MB • PDF max 50 MB • max 50 pages
+          {% endif %}
+        </p>
+      </div>
+
+      <div>
+        <label>{% if ui_lang=="sk" %}Jazyky{% else %}Languages{% endif %}</label>
+        <div class="langs">
+          {% for L in ["sk","en","cs","de","pl","hu","fr","es","it"] %}
+            <label>
+              <input type="checkbox" name="langs" value="{{L}}"
+                {% if result and L in result.langs %}checked{% endif %}
+                {% if not result and L in ["sk","en"] %}checked{% endif %}>
+              {{ L }}
+            </label>
+          {% endfor %}
+        </div>
+
+        <label>GPU</label>
+        <label class="pill">
+          <input type="checkbox" name="gpu"
+            {% if cuda_ok %}checked{% endif %}
+            {% if not cuda_ok %}disabled{% endif %}>
+          CUDA
+          {% if cuda_ok %}<span class="ok">OK</span>{% else %}<span class="warn">N/A</span>{% endif %}
+        </label>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:12px">
+      <div>
+        <label>PDF pages</label>
+        <input type="text" name="page_range"
+               placeholder="1-3,5"
+               style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px">
+      </div>
+      <div>
+        <label>DPI</label>
+        <input type="number" name="dpi" value="200" min="72" max="600"
+               style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px">
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <button type="submit">
+        {% if ui_lang=="sk" %}Spustiť OCR{% else %}Run OCR{% endif %}
+      </button>
+    </div>
+
+  </form>
+</div>
+
+{% if result %}
+<div class="card">
+  <h3>
+    {% if ui_lang=="sk" %}Rozpoznaný text{% else %}Recognized text{% endif %}
+    ({{ result.pages }} {% if ui_lang=="sk" %}strán{% else %}pages{% endif %})
+  </h3>
+
+  <textarea id="plainText" readonly>{{ result.text }}</textarea>
+
+  <div class="actions">
+    <button id="copyBtn" onclick="copyPlain()">Copy</button>
+    {% if text_url %}
+      <a class="btn" href="{{ text_url }}" download>TXT</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<footer class="muted">
+  <small>
+    EasyOCR GUI • Flask + Waitress •
+    {% if ui_lang=="sk" %}
+      Beží lokálne
+    {% else %}
+      Running locally
+    {% endif %}
+  </small>
+</footer>
+
+</body>
+</html>
